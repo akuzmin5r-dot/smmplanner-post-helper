@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         SMMplanner Helper — Safari
 // @namespace    https://smmplanner.com/
-// @version      2.5.0
+// @version      2.6.0
 // @updateURL    https://raw.githubusercontent.com/akuzmin5r-dot/smmplanner-post-helper/main/smmplanner-safari.user.js
 // @downloadURL  https://raw.githubusercontent.com/akuzmin5r-dot/smmplanner-post-helper/main/smmplanner-safari.user.js
 // @description  Автовыбор страниц и копирование заголовка со всеми опубликованными ссылками.
@@ -135,6 +135,9 @@
     const skinLabel = document.createElement('label'); skinLabel.className = 'ph-choice';
     const skinInput = document.createElement('input'); skinInput.type = 'checkbox'; skinInput.checked = settings.skin !== false;
     skinLabel.append(skinInput,document.createTextNode('Обновлённое оформление страницы')); box.append(skinLabel);
+    const trimLabel = document.createElement('label'); trimLabel.className = 'ph-choice';
+    const trimInput = document.createElement('input'); trimInput.type = 'checkbox'; trimInput.checked = settings.footerTrim !== false;
+    trimLabel.append(trimInput, document.createTextNode('Удалять подпись о подписке при вставке')); box.append(trimLabel);
     const choices = [];
     for (const page of pages.filter(p => p.medium === 'vk' || p.medium === 'ok')) {
       const label = document.createElement('label'); label.className = 'ph-choice';
@@ -148,7 +151,7 @@
     box.append(button('Сохранить и выбрать', () => {
       const selected = choices.filter(x => x.input.checked).map(x => ({ key: x.page.key, total: x.page.total }));
       if (!selected.length) { message.textContent = 'Выберите хотя бы одну страницу.'; return; }
-      try { saveSettings(doc, { enabled: enabledInput.checked, skin: skinInput.checked, pages: selected }); } catch { message.textContent = 'Не удалось сохранить настройки браузера.'; return; }
+      try { saveSettings(doc, { ...settings, enabled: enabledInput.checked, skin: skinInput.checked, footerTrim: trimInput.checked, pages: selected }); } catch { message.textContent = 'Не удалось сохранить настройки браузера.'; return; }
       handled.delete(modal); overlay.remove(); applyDefaults(doc, modal);
     }), button('Отмена', () => overlay.remove()));
   }
@@ -191,6 +194,69 @@
     if (!s.pages.length) return 'Автовыбор: выберите страницы';
     return s.enabled ? 'Автовыбор · страниц: ' + s.pages.length : 'Автовыбор выключен';
   }
+  function footerKey(value) {
+    const text = String(value || '')
+      .replace(/\[([^\]\r\n]+)\]\(\s*(?:https?:\/\/|t\.me\/|max\.ru\/)[^)\s]+\s*\)/gi, '$1')
+      .replace(/\(\s*(?:https?:\/\/|t\.me\/|max\.ru\/)[^)\s]+\s*\)/gi, '')
+      .replace(/<?(?:https?:\/\/|t\.me\/|max\.ru\/)[^\s<>()\]]+>?/gi, '')
+      .replace(/\*\*|__/g, '').replace(/[\u200b\ufeff]/g, '');
+    const lines = text.split(/\r?\n/).map(line => line.trim()).filter(Boolean);
+    return lines.length === 1 ? lines[0].replace(/[ \t\u00a0]+/g, ' ').trim() : '';
+  }
+  function footerBoundary(text, index) {
+    if (index === 0) return true;
+    const prefix = text.slice(0, index);
+    return /\n[ \t\u00a0]*$/.test(prefix) || /[.!?…][ \t\u00a0]+$/.test(prefix) || /[ \t\u00a0]{2,}$/.test(prefix);
+  }
+  function trimSubscriptionFooter(input, settings = {}) {
+    const original = String(input);
+    if (settings.footerTrim === false) return { text: original, removed: false };
+    const signatures = (Array.isArray(settings.footerSignatures) ? settings.footerSignatures : [])
+      .filter(value => typeof value === 'string' && value.length <= 1000).slice(0, 30)
+      .map(footerKey).filter(Boolean).map(value => value.toLocaleLowerCase());
+    let result = original, removed = false;
+    for (let pass = 0; pass < 5; pass++) {
+      const starts = new Set([0]);
+      for (const match of result.matchAll(/\n[ \t\u00a0]*/g)) starts.add(match.index + match[0].length);
+      for (const match of result.matchAll(/\[[^\]\r\n]+\]\(\s*(?:https?:\/\/|t\.me\/|max\.ru\/)[^)\s]+\s*\)/gi)) starts.add(match.index);
+      for (const match of result.matchAll(/(?:\*\*|__)?\[?Подписывайтесь[ \t\u00a0]+на[ \t\u00a0]+/giu)) starts.add(match.index);
+      for (const match of result.matchAll(/(?:\*\*|__)?\[?Подписаться[ \t\u00a0]+(?:в|на)[ \t\u00a0]+(?:MAX|МАКС|Telegram|Телеграм)/giu)) starts.add(match.index);
+      for (const signature of signatures) {
+        const first = signature.match(/[\p{L}\p{N}@]+/u)?.[0];
+        if (!first) continue;
+        const lower = result.toLocaleLowerCase();
+        for (let index = lower.indexOf(first); index >= 0; index = lower.indexOf(first, index + first.length)) {
+          let start = index;
+          while (start > 0 && /[\[*_]/.test(result[start - 1])) start--;
+          starts.add(start);
+        }
+      }
+      let cut = null;
+      for (const start of [...starts].sort((a, b) => a - b)) {
+        const fragment = result.slice(start);
+        if (fragment.length > 2500 || !footerBoundary(result, start)) continue;
+        const key = footerKey(fragment);
+        if (!key || key.length > 240) continue;
+        if (signatures.includes(key.toLocaleLowerCase())) { cut = start; break; }
+        const linked = /(?:https?:\/\/|t\.me\/|max\.ru\/)/i.test(fragment);
+        const invite = key.match(/^Подписывайтесь на (.{1,120})$/iu);
+        if (invite && !/[!?…:;«»"'“”]/u.test(invite[1]) && !/\.\s|[.,]$/.test(invite[1]) &&
+            (linked || /^[\p{Lu}\p{N}@]/u.test(invite[1]))) { cut = start; break; }
+        if (/^Подписаться (?:в|на) (?:MAX|МАКС|Telegram|Телеграм)$/iu.test(key)) { cut = start; break; }
+        const pair = key.match(/^([^/\n]{1,100})\s*\/\s*Подписаться (?:в|на) (?:MAX|МАКС)$/iu);
+        if (pair && !/[!?…:;«»"'“”]|\.\s/u.test(pair[1]) &&
+            (linked || (start > 0 && /\n[ \t\u00a0]*$/.test(result.slice(0, start)) && /^[\p{Lu}\p{N}@]/u.test(pair[1])))) {
+          cut = start; break;
+        }
+      }
+      if (cut === null) break;
+      const next = result.slice(0, cut).trimEnd();
+      if (next.length >= result.length) break;
+      result = next; removed = true;
+    }
+    return { text: result, removed };
+  }
+
   function addPaste(doc, modal) {
     const field = modal.querySelector('emoji-input[ng-model="project.text"],textarea[ng-model="project.text"]');
     if (!field || modal.querySelector('.ph-paste')) return;
@@ -207,7 +273,7 @@
       if (updating) return;
       if (!modal.isConnected) { clearTimeout(timer); observer?.disconnect(); return; }
       const mode = hasText() ? 'clear' : 'paste';
-      if (mode === 'clear' && snapshot) discardUndo();
+      if (snapshot && snapshot.key !== contentKey()) discardUndo();
       if (paste.dataset.mode !== mode) {
         paste.dataset.mode = mode;
         actionLabel(paste, mode === 'clear' ? 'Очистить' : 'Вставить текст', mode === 'clear' ? 'clear' : 'paste');
@@ -217,7 +283,7 @@
     const observer = editor ? new doc.defaultView.MutationObserver(() => queueMicrotask(refresh)) : null;
     function discardUndo() {
       snapshot = null; clearTimeout(timer); timer = null;
-      status.querySelector('.ph-undo-text')?.remove();
+      status.querySelector('.ph-undo-notice')?.remove();
     }
     function saveScroll() {
       const nodes = new Set();
@@ -247,12 +313,71 @@
       refresh(); restoreScroll();
       doc.defaultView.requestAnimationFrame(() => { if (modal.isConnected) restoreScroll(); });
     }
+    function contentKey() {
+      if (!editor) return field.value;
+      const read = node => node.nodeType === 3 ? node.nodeValue
+        : node.nodeName === 'BR' ? '\n' : node.nodeName === 'IMG' ? node.getAttribute('alt') || ''
+        : [...node.childNodes].map(read).join('');
+      return read(editor).replace(/\u200b/g, '');
+    }
+    function plainFragment(text) {
+      const fragment = doc.createDocumentFragment();
+      String(text).replace(/\r\n?/g, '\n').split('\n').forEach((part, index) => {
+        if (index) fragment.append(doc.createElement('br'));
+        fragment.append(doc.createTextNode(part));
+      });
+      return fragment;
+    }
+    function writePlain(text) {
+      if (editor) editor.replaceChildren(plainFragment(text));
+      else field.value = text;
+    }
+    (editor || field).addEventListener('paste', event => {
+      const clipboard = event.clipboardData;
+      if (!clipboard || clipboard.files?.length) return;
+      const text = clipboard.getData('text/plain');
+      if (!text) return;
+      const cleaned = trimSubscriptionFooter(text, readSettings(doc));
+      if (!cleaned.removed) return;
+      let saved, insert;
+      if (editor) {
+        const selection = doc.defaultView.getSelection();
+        const range = selection?.rangeCount ? selection.getRangeAt(0).cloneRange() : doc.createRange();
+        if (!editor.contains(range.startContainer) || !editor.contains(range.endContainer)) {
+          range.selectNodeContents(editor); range.collapse(false);
+        }
+        const path = node => {
+          const parts = [];
+          while (node !== editor) { parts.unshift([...node.parentNode.childNodes].indexOf(node)); node = node.parentNode; }
+          return parts;
+        };
+        const startPath = path(range.startContainer), endPath = path(range.endContainer);
+        const clone = editor.cloneNode(true), rawRange = doc.createRange();
+        const at = parts => parts.reduce((node, index) => node.childNodes[index], clone);
+        rawRange.setStart(at(startPath), range.startOffset);
+        rawRange.setEnd(at(endPath), range.endOffset);
+        rawRange.deleteContents(); rawRange.insertNode(plainFragment(text));
+        saved = { nodes: [...clone.childNodes].map(node => node.cloneNode(true)), cleanup: true };
+        insert = () => {
+          range.deleteContents();
+          const fragment = plainFragment(cleaned.text), last = fragment.lastChild;
+          range.insertNode(fragment);
+          if (last && selection) { range.setStartAfter(last); range.collapse(true); selection.removeAllRanges(); selection.addRange(range); }
+        };
+      } else {
+        const start = field.selectionStart, end = field.selectionEnd, before = field.value.slice(0, start), after = field.value.slice(end);
+        saved = { value: before + text + after, cleanup: true };
+        insert = () => { field.value = before + cleaned.text + after; field.setSelectionRange(start + cleaned.text.length, start + cleaned.text.length); };
+      }
+      event.preventDefault(); event.stopImmediatePropagation();
+      discardUndo(); changeContent(insert); showUndo(saved);
+    }, true);
     function showUndo(saved) {
-      snapshot = saved;
-      const undo = doc.createElement('button'); undo.type = 'button'; undo.className = 'ph-undo-text'; undo.textContent = 'Вернуть текст';
+      snapshot = { ...saved, key: contentKey() };
+      const undo = doc.createElement('button'); undo.type = 'button'; undo.className = 'ph-undo-text'; undo.textContent = saved.cleanup ? 'Вернуть подпись' : 'Вернуть текст';
       undo.onclick = event => {
         event.preventDefault(); event.stopPropagation();
-        if (!snapshot || hasText()) { discardUndo(); refresh(); return; }
+        if (!snapshot || snapshot.key !== contentKey()) { discardUndo(); refresh(); return; }
         const saved = snapshot;
         discardUndo(); status.textContent = '';
         changeContent(() => {
@@ -260,7 +385,9 @@
           else field.value = saved.value;
         });
       };
-      status.replaceChildren(undo);
+      const notice = doc.createElement('span'); notice.className = 'ph-undo-notice';
+      if (saved.cleanup) notice.append(doc.createTextNode('Подпись удалена · '));
+      notice.append(undo); status.replaceChildren(notice);
       timer = setTimeout(() => { discardUndo(); refresh(); }, 10000);
     }
     paste.onclick = async event => {
@@ -282,16 +409,11 @@
         // Do not replace content typed while a clipboard permission prompt was open.
         if (hasText()) { status.textContent = 'В поле уже появился текст. Он сохранён.'; return; }
         discardUndo();
-        changeContent(() => {
-          if (editor) {
-            const fragment = doc.createDocumentFragment();
-            String(text).replace(/\r\n?/g, '\n').split('\n').forEach((part, index) => {
-              if (index) fragment.append(doc.createElement('br'));
-              fragment.append(doc.createTextNode(part));
-            });
-            editor.replaceChildren(fragment);
-          } else field.value = text;
-        });
+        const cleaned = trimSubscriptionFooter(text, readSettings(doc));
+        changeContent(() => writePlain(cleaned.text));
+        if (cleaned.removed) showUndo(editor
+          ? { nodes: [...plainFragment(text).childNodes], cleanup: true }
+          : { value: text, cleanup: true });
       } catch (error) {
         status.textContent = error.name === 'NotAllowedError' ? 'Разрешите вставку из буфера и нажмите ещё раз. Либо используйте вставку через поле поста.' : error.message;
       } finally { pending = false; paste.disabled = false; refresh(); }

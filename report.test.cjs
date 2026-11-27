@@ -23,3 +23,27 @@ let density='';const densityContext={document:{documentElement:{clientWidth:980,
 vm.runInNewContext(densitySource+';this.sync=syncDensity;',densityContext);
 densityContext.sync();const fixed=density;densityContext.visualViewport.scale=2;densityContext.sync();assert.equal(density,fixed);
 console.log('PASS: native action respects disabled/disconnected controls (stub only); CSS density stays fixed during pinch zoom');
+
+const footerSource=source.slice(source.indexOf('  function footerKey('),source.indexOf('  function addPaste('));
+const footerContext={};vm.runInNewContext(footerSource+';this.trim=trimSubscriptionFooter;',footerContext);
+const trim=footerContext.trim, body='🚤 Заголовок\n\nТекст со ссылкой https://example.invalid/source.\n\nПоследнее предложение.';
+for(const footer of [
+ 'Подписывайтесь на Городские новости',
+ '[Подписывайтесь на Городские новости](https://max.ru/example_channel)',
+ 'Подписывайтесь на Городские новости (https://max.ru/example_channel)',
+ '[Городские новости](https://t.me/example_channel) / [Подписаться в MAX](https://max.ru/example_channel)',
+ 'Городские новости / Подписаться в MAX',
+ 'Городские новости (https://t.me/example_channel) / Подписаться в MAX (https://max.ru/example_channel)',
+ 'Подписаться в MAX'
+]){assert.equal(trim(body+'\n\n'+footer).text,body,footer);}
+assert.equal(trim(body+'  [Подписывайтесь на Городские новости](https://max.ru/example_channel)').text,body);
+assert.equal(trim(body+'  [Городские новости](https://t.me/example_channel) / [Подписаться в MAX](https://max.ru/example_channel)').text,body);
+for(const text of [body,body+'\n\nИсточник: https://example.invalid/source','Он сказал: «Подписывайтесь на Городские новости».','Подписывайтесь на обновления, если хотите узнать результат.',body+'\n\nhttps://max.ru/example_channel']){
+ assert.equal(trim(text).text,text);assert.equal(trim(text).removed,false);
+}
+const original=body+'\n\nПодписаться в MAX';
+assert.equal(trim(original,{footerTrim:false}).text,original);
+assert.equal(trim(body+'\n\nЛокальная подпись',{footerSignatures:['Локальная подпись']}).text,body);
+assert.equal(trim(body+'\n\nПодписаться в MAX\n\nПодписаться в MAX').text,body);
+assert.equal(trim('[🚤](https://st.max.ru/emojis/1F6A4_32.webp) **Заголовок**.\n\nПодписаться в MAX').text,'[🚤](https://st.max.ru/emojis/1F6A4_32.webp) **Заголовок**.');
+console.log('PASS: subscription footer formats, inline tail, body preservation, opt-out, local signatures, repeated tails');
