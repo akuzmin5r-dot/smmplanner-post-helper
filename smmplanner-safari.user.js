@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         SMMplanner Helper — Safari
 // @namespace    https://smmplanner.com/
-// @version      2.2.0
+// @version      2.3.0
 // @updateURL    https://raw.githubusercontent.com/akuzmin5r-dot/smmplanner-post-helper/main/smmplanner-safari.user.js
 // @downloadURL  https://raw.githubusercontent.com/akuzmin5r-dot/smmplanner-post-helper/main/smmplanner-safari.user.js
 // @description  Автовыбор страниц и копирование заголовка со всеми опубликованными ссылками.
@@ -16,8 +16,8 @@
   'use strict';
   if (window !== top || window.__postHelperV2) return;
   window.__postHelperV2 = true;
-  const version = '2.2.0';
-  let busy = false, configureRequested = false;
+  const version = '2.3.0';
+  let busy = false, configureRequested = false, editorSequence = 0;
   const installed = new WeakSet(), handled = new WeakSet();
   const sleep = ms => new Promise(r => setTimeout(r, ms));
   const firstLine = text => String(text || '').split(/\r\n|[\n\r\u2028\u2029]/).map(s => s.trim()).find(Boolean) || '';
@@ -132,6 +132,9 @@
     const enabledLabel = document.createElement('label'); enabledLabel.className = 'ph-choice';
     const enabledInput = document.createElement('input'); enabledInput.type = 'checkbox'; enabledInput.checked = settings.enabled;
     enabledLabel.append(enabledInput,document.createTextNode('Автоматически выбирать страницы в новом посте')); box.append(enabledLabel);
+    const skinLabel = document.createElement('label'); skinLabel.className = 'ph-choice';
+    const skinInput = document.createElement('input'); skinInput.type = 'checkbox'; skinInput.checked = settings.skin !== false;
+    skinLabel.append(skinInput,document.createTextNode('Обновлённое оформление страницы')); box.append(skinLabel);
     const choices = [];
     for (const page of pages.filter(p => p.medium === 'vk' || p.medium === 'ok')) {
       const label = document.createElement('label'); label.className = 'ph-choice';
@@ -145,7 +148,7 @@
     box.append(button('Сохранить и выбрать', () => {
       const selected = choices.filter(x => x.input.checked).map(x => ({ key: x.page.key, total: x.page.total }));
       if (!selected.length) { message.textContent = 'Выберите хотя бы одну страницу.'; return; }
-      try { saveSettings(doc, { enabled: enabledInput.checked, pages: selected }); } catch { message.textContent = 'Не удалось сохранить настройки браузера.'; return; }
+      try { saveSettings(doc, { enabled: enabledInput.checked, skin: skinInput.checked, pages: selected }); } catch { message.textContent = 'Не удалось сохранить настройки браузера.'; return; }
       handled.delete(modal); overlay.remove(); applyDefaults(doc, modal);
     }), button('Отмена', () => overlay.remove()));
   }
@@ -180,7 +183,8 @@
 
   function syncDensity(doc = document) {
     const touch = matchMedia('(pointer:coarse)').matches;
-    const factor = touch ? Math.min(3, Math.max(1, 1 / (visualViewport?.scale || 1))) : 1;
+    const layoutWidth = document.documentElement.clientWidth;
+    const factor = touch ? Math.min(3, Math.max(1, layoutWidth / Math.max(1, screen.width || layoutWidth))) : 1;
     const value = String(Math.round(factor * 100) / 100);
     if (doc.documentElement.style.getPropertyValue('--ph-size') !== value) doc.documentElement.style.setProperty('--ph-size', value);
   }
@@ -226,13 +230,70 @@
         status.textContent = error.name === 'NotAllowedError' ? 'Разрешите Safari вставку из буфера и нажмите ещё раз. Либо вставьте текст через поле поста.' : error.message;
       } finally { paste.disabled = false; }
     };
-    line.append(paste, status); field.before(line);
+    line.append(paste, status); (field.closest('.form-group.emoji-group') || field).before(line);
+  }
+
+  function invokeNativeOk(modal) {
+    const native = modal.querySelector('.modal-footer button[ng-click="ok()"]');
+    if (!native?.isConnected || native.disabled || native.getAttribute('aria-disabled') === 'true') return false;
+    native.click();
+    return true;
+  }
+  function enhanceEditor(doc, modal) {
+    const native = modal.querySelector('.modal-footer button[ng-click="ok()"]');
+    const cancel = modal.querySelector('.modal-footer button[ng-click="closeWithConfirm()"]');
+    const field = modal.querySelector('emoji-input[ng-model="project.text"]');
+    const photo = modal.querySelector('button[ngf-select][ngf-change="onPictureSelect($files)"]');
+    const settings = modal.querySelector('.postproject-form__settings');
+    const media = photo?.parentElement;
+    const line = modal.querySelector('.ph-paste-row');
+    // If the native form changes, keep its existing controls visible and intact.
+    if (!native || !cancel || !field || !photo || !settings || !line || !media?.classList.contains('form-group')) return;
+    modal.classList.add('ph-new-post');
+    native.parentElement.classList.add('ph-editor-footer');
+    photo.classList.add('ph-main-media');
+    media.classList.add('ph-media-tools');
+    const poll = media.querySelector('button[ng-click="poll.toggle()"]');
+    poll?.classList.add('ph-main-media');
+    media.dataset.hasPoll = String(!!poll);
+    settings.classList.add('ph-extra-options');
+    if (!line.querySelector('.ph-submit-proxy')) {
+      const proxy = doc.createElement('button'); proxy.type = 'button'; proxy.className = 'ph-submit-proxy';
+      proxy.textContent = 'Опубликовать пост';
+      proxy.title = 'Повторяет ОК: публикация или планирование по указанному времени';
+      proxy.setAttribute('aria-description', 'Использует выбранные страницы, дату и время, как штатная кнопка ОК');
+      proxy.onclick = event => { event.preventDefault(); event.stopPropagation(); invokeNativeOk(modal); };
+      line.insertBefore(proxy, line.querySelector('.ph-paste-status'));
+      const sync = () => {
+        proxy.disabled = native.disabled || native.getAttribute('aria-disabled') === 'true';
+        proxy.setAttribute('aria-disabled', String(proxy.disabled));
+      };
+      new doc.defaultView.MutationObserver(sync).observe(native, { attributes: true, attributeFilter: ['disabled', 'aria-disabled'] });
+      sync();
+    }
+    let more = media.querySelector('.ph-more');
+    if (!more) {
+      more = doc.createElement('button'); more.type = 'button'; more.className = 'ph-more';
+      more.onclick = event => {
+        event.preventDefault(); event.stopPropagation();
+        modal.classList.toggle('ph-options-open');
+        more.setAttribute('aria-expanded', String(modal.classList.contains('ph-options-open')));
+        enhanceEditor(doc, modal);
+      };
+      media.append(more);
+    }
+    if (!settings.id) settings.id = 'ph-extra-' + (++editorSequence);
+    more.setAttribute('aria-controls', settings.id);
+    const active = [...settings.querySelectorAll('input[type="checkbox"]:checked')].filter(input => !input.closest('.ng-hide')).length;
+    const next = (modal.classList.contains('ph-options-open') ? 'Скрыть настройки' : 'Дополнительные настройки') + (active ? ' · включено: ' + active : '');
+    if (more.textContent !== next) more.textContent = next;
+    more.setAttribute('aria-expanded', String(modal.classList.contains('ph-options-open')));
   }
 
   function install(doc) {
     if (installed.has(doc)) return;
     installed.add(doc);
-    const style = doc.createElement('style'); style.textContent = ".ph-actions{clear:both;display:flex;flex-wrap:wrap;align-items:center;justify-content:flex-end;gap:8px;padding:12px 0 2px}.ph-copy,.ph-paste{box-sizing:border-box;display:inline-flex;align-items:center;justify-content:center;gap:8px;min-height:36px;padding:8px 12px;font:500 13px/1.25 -apple-system,BlinkMacSystemFont,\"Segoe UI\",sans-serif;color:#31577d;background:#fff;border:1px solid #bdcddd;border-radius:6px;cursor:pointer;touch-action:manipulation;max-width:100%}.ph-copy:hover,.ph-paste:hover{background:#f4f7fb;border-color:#8faac4}.ph-copy:active,.ph-paste:active{background:#eaf0f7}.ph-copy:disabled,.ph-paste:disabled{opacity:.6;cursor:wait}.ph-copy:focus-visible,.ph-paste:focus-visible{outline:2px solid #457dae;outline-offset:3px}.ph-icon{width:16px;height:16px;flex:none}.ph-note,.ph-status,.ph-paste-status{display:block;font:12px/1.4 -apple-system,BlinkMacSystemFont,\"Segoe UI\",sans-serif;color:#31577d}.ph-status:empty,.ph-paste-status:empty{display:none}.ph-status:not(:empty){margin:4px 0;flex-basis:100%;text-align:right}.ph-paste-row{display:flex;align-items:center;flex-wrap:wrap;gap:8px;margin:8px 0}.ph-paste{background:#f6f9fc}.ph-paste-status{flex-basis:100%}@media(pointer:coarse){.ph-copy,.ph-paste{min-height:calc(44px * var(--ph-size,1));font-size:calc(14px * var(--ph-size,1));padding:calc(10px * var(--ph-size,1)) calc(12px * var(--ph-size,1));gap:calc(8px * var(--ph-size,1));border-width:calc(1px * var(--ph-size,1));border-radius:calc(7px * var(--ph-size,1))}.ph-actions{padding-top:calc(10px * var(--ph-size,1));padding-bottom:calc(2px * var(--ph-size,1))}.ph-icon{width:calc(16px * var(--ph-size,1));height:calc(16px * var(--ph-size,1))}.ph-note,.ph-status,.ph-paste-status{font-size:calc(12px * var(--ph-size,1))}.ph-paste-row{margin:calc(8px * var(--ph-size,1)) 0}}"; doc.head.append(style);
+    const style = doc.createElement('style'); style.textContent = ".ph-actions{clear:both;display:flex;flex-wrap:wrap;align-items:center;justify-content:flex-end;gap:8px;padding:12px 0 2px}.ph-copy,.ph-paste{box-sizing:border-box;display:inline-flex;align-items:center;justify-content:center;gap:8px;min-height:36px;padding:8px 12px;font:500 13px/1.25 -apple-system,BlinkMacSystemFont,\"Segoe UI\",sans-serif;color:#31577d;background:#fff;border:1px solid #bdcddd;border-radius:6px;cursor:pointer;touch-action:manipulation;max-width:100%}.ph-copy:hover,.ph-paste:hover{background:#f4f7fb;border-color:#8faac4}.ph-copy:active,.ph-paste:active{background:#eaf0f7}.ph-copy:disabled,.ph-paste:disabled{opacity:.6;cursor:wait}.ph-copy:focus-visible,.ph-paste:focus-visible{outline:2px solid #457dae;outline-offset:3px}.ph-icon{width:16px;height:16px;flex:none}.ph-note,.ph-status,.ph-paste-status{display:block;font:12px/1.4 -apple-system,BlinkMacSystemFont,\"Segoe UI\",sans-serif;color:#31577d}.ph-status:empty,.ph-paste-status:empty{display:none}.ph-status:not(:empty){margin:4px 0;flex-basis:100%;text-align:right}.ph-paste-row{display:flex;align-items:center;flex-wrap:wrap;gap:8px;margin:8px 0}.ph-paste{background:#f6f9fc}.ph-paste-status{flex-basis:100%}@media(pointer:coarse){.ph-copy,.ph-paste{min-height:calc(44px * var(--ph-size,1));font-size:calc(14px * var(--ph-size,1));padding:calc(10px * var(--ph-size,1)) calc(12px * var(--ph-size,1));gap:calc(8px * var(--ph-size,1));border-width:calc(1px * var(--ph-size,1));border-radius:calc(7px * var(--ph-size,1))}.ph-actions{padding-top:calc(10px * var(--ph-size,1));padding-bottom:calc(2px * var(--ph-size,1))}.ph-icon{width:calc(16px * var(--ph-size,1));height:calc(16px * var(--ph-size,1))}.ph-note,.ph-status,.ph-paste-status{font-size:calc(12px * var(--ph-size,1))}.ph-paste-row{margin:calc(8px * var(--ph-size,1)) 0}}"; style.textContent += "\n.ph-skin .post-list-item{border-bottom-color:#e1e7ef}.ph-skin .post-list-item-published{background-color:#f6f8fb}.ph-skin .c-soc-page__link{color:#315c85}.ph-skin .form-control{border-color:#cad5e1;border-radius:6px;box-shadow:none}.ph-skin .btn{border-radius:6px}.ph-skin .btn-primary{background-color:#31577d;border-color:#31577d}.ph-skin .btn:focus-visible,.ph-skin .form-control:focus-visible{outline:2px solid #537fa8;outline-offset:2px}.ph-skin .modal-content{border:1px solid #d7e0e9;border-radius:12px}.ph-skin .modal-header,.ph-skin .modal-footer{border-color:#e2e8ef}\n.ph-new-post{width:calc(100% - 32px);max-width:720px}.ph-new-post .modal-content{border-radius:12px}.ph-new-post .ph-paste-row{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:10px;align-items:stretch;margin:10px 0 14px}.ph-new-post .ph-paste-row>.ph-paste,.ph-new-post .ph-submit-proxy{width:100%;min-width:0;max-width:100%;min-height:46px;margin:0;padding:12px;font:500 14px/1.3 -apple-system,BlinkMacSystemFont,\"Segoe UI\",sans-serif;white-space:normal;text-align:center;border-radius:7px;box-sizing:border-box}.ph-new-post .ph-paste-status{grid-column:1/-1}.ph-new-post .ph-submit-proxy{background:#31577d;color:#fff;border:1px solid #31577d;cursor:pointer;touch-action:manipulation}.ph-new-post .ph-submit-proxy:hover{background:#274868}.ph-new-post .ph-submit-proxy:disabled{opacity:.5;cursor:not-allowed}.ph-new-post .ph-submit-proxy:focus-visible,.ph-new-post .ph-more:focus-visible{outline:2px solid #537fa8;outline-offset:3px}\n.ph-new-post .ph-media-tools{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:10px}.ph-new-post .ph-media-tools>.ph-main-media{order:0;width:100%;min-width:0;min-height:46px;padding:12px 8px;margin:0;font:500 14px/1.3 -apple-system,BlinkMacSystemFont,\"Segoe UI\",sans-serif;color:#31577d;border:1px solid #bdcddd;background:#f6f9fc;white-space:normal;box-sizing:border-box}.ph-new-post .ph-media-tools[data-has-poll=false]>.ph-main-media{grid-column:1/-1}.ph-new-post .ph-media-tools>button:not(.ph-main-media):not(.ph-more){order:2;min-height:36px;white-space:normal;margin:0}.ph-new-post .ph-more{order:1;grid-column:1/-1;display:block;width:100%;min-height:36px;padding:8px 2px;text-align:left;color:#4d647b;background:none;border:0;border-top:1px solid #e0e7ef;font:13px/1.4 -apple-system,BlinkMacSystemFont,\"Segoe UI\",sans-serif;cursor:pointer}.ph-new-post .ph-more::after{content:\"\";display:inline-block;width:6px;height:6px;border-right:1.5px solid currentColor;border-bottom:1.5px solid currentColor;transform:translateY(-2px) rotate(45deg);margin-left:10px}.ph-new-post.ph-options-open .ph-more::after{transform:translateY(2px) rotate(225deg)}.ph-new-post:not(.ph-options-open) .ph-media-tools>button:not(.ph-main-media):not(.ph-more),.ph-new-post:not(.ph-options-open) .ph-extra-options{display:none!important}.ph-new-post.ph-options-open .ph-extra-options{animation:ph-reveal .16s ease-out}.ph-new-post .ph-extra-options{padding-top:8px}.ph-new-post .ph-extra-options label{line-height:1.65}\n.ph-new-post .ph-editor-footer::before,.ph-new-post .ph-editor-footer::after{content:none;display:none}.ph-new-post .ph-editor-footer{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:10px;padding:16px}.ph-new-post .ph-editor-footer>button{float:none!important;margin:0!important;min-width:0;min-height:46px;padding:12px;box-sizing:border-box;white-space:normal;font:500 14px/1.3 -apple-system,BlinkMacSystemFont,\"Segoe UI\",sans-serif}.ph-new-post .ph-editor-footer>button[ng-click=\"ok()\"]{order:0;grid-column:1;color:#fff;background:#31577d;border-color:#31577d}.ph-new-post .ph-editor-footer>button[ng-click=\"closeWithConfirm()\"]{order:1;grid-column:2;background:#fff;color:#4d647b;border-color:#cad5e1}.ph-new-post .ph-editor-footer>button:not([ng-click=\"ok()\"]):not([ng-click=\"closeWithConfirm()\"]){order:2;grid-column:1/-1}\n@media(pointer:coarse){.ph-new-post{width:calc(100% - 24px * var(--ph-size,1));max-width:calc(760px * var(--ph-size,1))}.ph-new-post .modal-body{padding:calc(16px * var(--ph-size,1))}.ph-new-post .modal-header{padding:calc(16px * var(--ph-size,1))}.ph-new-post .modal-header h3,.ph-new-post .modal-header h4{font-size:calc(20px * var(--ph-size,1))}.ph-new-post .ph-paste-row{gap:calc(8px * var(--ph-size,1));margin:calc(8px * var(--ph-size,1)) 0 calc(12px * var(--ph-size,1))}.ph-new-post .ph-paste-row>.ph-paste,.ph-new-post .ph-submit-proxy{min-height:calc(48px * var(--ph-size,1));font-size:calc(14px * var(--ph-size,1));padding:calc(12px * var(--ph-size,1)) calc(8px * var(--ph-size,1));border-radius:calc(7px * var(--ph-size,1));border-width:calc(1px * var(--ph-size,1))}.ph-new-post emoji-input[ng-model=\"project.text\"] .emoji-wysiwyg-editor{font-size:calc(16px * var(--ph-size,1));line-height:1.5;min-height:calc(140px * var(--ph-size,1));padding:calc(10px * var(--ph-size,1));border-radius:calc(7px * var(--ph-size,1))}.ph-new-post .ph-media-tools{gap:calc(8px * var(--ph-size,1))}.ph-new-post .ph-media-tools>.ph-main-media{min-height:calc(48px * var(--ph-size,1));font-size:calc(14px * var(--ph-size,1));padding:calc(12px * var(--ph-size,1)) calc(8px * var(--ph-size,1));border-width:calc(1px * var(--ph-size,1));border-radius:calc(7px * var(--ph-size,1))}.ph-new-post .ph-more{font-size:calc(12px * var(--ph-size,1));min-height:calc(40px * var(--ph-size,1));padding:calc(10px * var(--ph-size,1)) 0}.ph-new-post .ph-extra-options{font-size:calc(13px * var(--ph-size,1))}.ph-new-post .ph-extra-options input[type=checkbox]{width:calc(16px * var(--ph-size,1));height:calc(16px * var(--ph-size,1))}.ph-new-post .ph-editor-footer{gap:calc(8px * var(--ph-size,1));padding:calc(16px * var(--ph-size,1))}.ph-new-post .ph-editor-footer>button{min-height:calc(48px * var(--ph-size,1));font-size:calc(14px * var(--ph-size,1));padding:calc(12px * var(--ph-size,1))}.ph-new-post .ph-media-tools>button:not(.ph-main-media):not(.ph-more){font-size:calc(13px * var(--ph-size,1));min-height:calc(40px * var(--ph-size,1));padding:calc(10px * var(--ph-size,1))}}\n@keyframes ph-reveal{from{opacity:0;transform:translateY(-4px)}to{opacity:1;transform:translateY(0)}}@media(prefers-reduced-motion:reduce){.ph-new-post.ph-options-open .ph-extra-options{animation:none}}\n"; doc.head.append(style);
     syncDensity(doc);
     function scan() {
       for (const row of doc.querySelectorAll('post')) {
@@ -252,7 +313,7 @@
       }
       const m=newModal(doc);
       if(m){
-        addPaste(doc,m);
+        addPaste(doc,m); enhanceEditor(doc,m);
         if(configureRequested&&pagesOf(m).length){configureRequested=false;configure(doc,m);}
         else applyDefaults(doc,m);
       }
@@ -287,6 +348,7 @@
       const doc=frame?.contentDocument;
       if(!doc?.body){utility.remove();return;}
       activeDoc=doc;install(doc);syncDensity(doc);
+      doc.documentElement.classList.toggle('ph-skin',readSettings(doc).skin!==false);
       if(!utility.isConnected)document.body.append(utility);
       const settings=readSettings(doc);
       const next=settings.pages.length?'Автовыбор · '+settings.pages.length:'Выбрать страницы';
