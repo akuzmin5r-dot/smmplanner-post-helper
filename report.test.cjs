@@ -47,3 +47,16 @@ assert.equal(trim(body+'\n\nЛокальная подпись',{footerSignatures
 assert.equal(trim(body+'\n\nПодписаться в MAX\n\nПодписаться в MAX').text,body);
 assert.equal(trim('[🚤](https://st.max.ru/emojis/1F6A4_32.webp) **Заголовок**.\n\nПодписаться в MAX').text,'[🚤](https://st.max.ru/emojis/1F6A4_32.webp) **Заголовок**.');
 console.log('PASS: subscription footer formats, inline tail, body preservation, opt-out, local signatures, repeated tails');
+
+const titleSource=source.slice(source.indexOf('  function videoTitleOf('),source.indexOf('  const videoTitles'));
+const titleContext={};vm.runInNewContext(titleSource+';this.title=videoTitleOf;',titleContext);
+const videoTitle=titleContext.title;
+assert.equal(videoTitle('😳 «Рынок» изменился\n\nОсновной текст.'),'«Рынок» изменился');
+assert.equal(videoTitle(' \n\n🚤 Заголовок\nс переносом\n\nТекст'),'Заголовок с переносом');
+assert.equal(videoTitle('Один абзац без эмодзи'),'Один абзац без эмодзи');
+assert.equal(videoTitle('👨‍👩‍👧‍👦 🇷🇺 👍🏽 1️⃣ #️⃣ **Новость** ©️\n\nТекст'),'Новость');
+assert.equal(videoTitle('📣 **Рост на 20%: C++ и #город — 2026**'),'Рост на 20%: C++ и #город — 2026');
+assert.equal(videoTitle('😀\n\nТекст'),'');
+assert.equal(videoTitle('А'.repeat(300)).length,255);
+assert.equal(videoTitle('[🚤](https://example.invalid/emoji.webp) **Новость**\n\nТекст'),'Новость');
+console.log('PASS: video title uses first paragraph, removes emoji sequences, preserves punctuation and respects native 255-character limit');
