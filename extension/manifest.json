@@ -1,0 +1,22 @@
+{
+  "manifest_version": 3,
+  "name": "SMMplanner Helper",
+  "version": "2.2.0",
+  "description": "Автовыбор страниц, вставка текста и копирование опубликованных ссылок в старой версии SMMplanner.",
+  "permissions": [
+    "clipboardRead",
+    "clipboardWrite"
+  ],
+  "content_scripts": [
+    {
+      "matches": [
+        "https://smmplanner.com/home/*"
+      ],
+      "js": [
+        "content.js"
+      ],
+      "run_at": "document_idle",
+      "world": "ISOLATED"
+    }
+  ]
+}

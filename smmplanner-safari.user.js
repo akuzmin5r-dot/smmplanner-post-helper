@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         SMMplanner Helper — Safari
 // @namespace    https://smmplanner.com/
-// @version      2.1.0
+// @version      2.2.0
 // @updateURL    https://raw.githubusercontent.com/akuzmin5r-dot/smmplanner-post-helper/main/smmplanner-safari.user.js
 // @downloadURL  https://raw.githubusercontent.com/akuzmin5r-dot/smmplanner-post-helper/main/smmplanner-safari.user.js
 // @description  Автовыбор страниц и копирование заголовка со всеми опубликованными ссылками.
@@ -16,7 +16,7 @@
   'use strict';
   if (window !== top || window.__postHelperV2) return;
   window.__postHelperV2 = true;
-  const version = '2.1.0';
+  const version = '2.2.0';
   let busy = false, configureRequested = false;
   const installed = new WeakSet(), handled = new WeakSet();
   const sleep = ms => new Promise(r => setTimeout(r, ms));
@@ -169,6 +169,15 @@
     note.textContent = 'Автовыбор: добавлено страниц — ' + matches.length + '. Их можно снять вручную.';
     modal.querySelector('h3,h4,.modal-title')?.after(note);
   }
+  function actionLabel(target, text, kind = 'copy') {
+    const doc = target.ownerDocument, ns = 'http://www.w3.org/2000/svg';
+    const icon = doc.createElementNS(ns, 'svg'); icon.setAttribute('viewBox','0 0 24 24'); icon.setAttribute('fill','none');
+    icon.setAttribute('stroke','currentColor'); icon.setAttribute('stroke-width','1.7'); icon.setAttribute('aria-hidden','true'); icon.classList.add('ph-icon');
+    const rect = (x,y,w,h,r=2) => { const el = doc.createElementNS(ns,'rect'); for(const [k,v] of Object.entries({x,y,width:w,height:h,rx:r}))el.setAttribute(k,v);icon.append(el); };
+    if(kind === 'paste'){rect(6,5,12,16);rect(9,3,6,4,1);}else{rect(8,8,12,13);const path=doc.createElementNS(ns,'path');path.setAttribute('d','M16 5V4a1 1 0 0 0-1-1H5a1 1 0 0 0-1 1v12a1 1 0 0 0 1 1');icon.append(path);}
+    const label = doc.createElement('span'); label.textContent = text;target.replaceChildren(icon,label);
+  }
+
   function syncDensity(doc = document) {
     const touch = matchMedia('(pointer:coarse)').matches;
     const factor = touch ? Math.min(3, Math.max(1, 1 / (visualViewport?.scale || 1))) : 1;
@@ -184,7 +193,7 @@
     const field = modal.querySelector('emoji-input[ng-model="project.text"],textarea[ng-model="project.text"]');
     if (!field || modal.querySelector('.ph-paste')) return;
     const line = doc.createElement('div'); line.className = 'ph-paste-row';
-    const paste = doc.createElement('button'); paste.type = 'button'; paste.className = 'ph-paste'; paste.textContent = 'Вставить текст';
+    const paste = doc.createElement('button'); paste.type = 'button'; paste.className = 'ph-paste'; actionLabel(paste,'Вставить текст','paste');
     paste.title = 'Добавить текст из буфера в конец поста';
     const status = doc.createElement('span'); status.className = 'ph-paste-status'; status.setAttribute('role', 'status');
     paste.onclick = async event => {
@@ -211,8 +220,8 @@
           field.dispatchEvent(new doc.defaultView.Event('input', { bubbles: true }));
           field.dispatchEvent(new doc.defaultView.Event('change', { bubbles: true }));
         } else throw Error('Не найден редактор текста.');
-        paste.textContent = 'Текст вставлен';
-        setTimeout(() => { paste.textContent = 'Вставить текст'; }, 2500);
+        actionLabel(paste,'Текст вставлен','paste');
+        setTimeout(() => { actionLabel(paste,'Вставить текст','paste'); }, 2500);
       } catch (error) {
         status.textContent = error.name === 'NotAllowedError' ? 'Разрешите Safari вставку из буфера и нажмите ещё раз. Либо вставьте текст через поле поста.' : error.message;
       } finally { paste.disabled = false; }
@@ -223,42 +232,24 @@
   function install(doc) {
     if (installed.has(doc)) return;
     installed.add(doc);
-    const style = doc.createElement('style'); style.textContent = ".ph-actions{clear:both;display:flex;flex-wrap:wrap;align-items:center;justify-content:flex-end;gap:12px;padding:12px 0 4px}.ph-copy,.ph-setup,.ph-paste{box-sizing:border-box;min-height:44px;padding:10px 16px;font:14px/1.3 Arial,sans-serif;color:#254968;background:#fff;border:1px solid #9bb0c3;border-radius:5px;cursor:pointer;touch-action:manipulation}.ph-copy{display:block;width:auto;min-width:210px;font-weight:600;background:#31577d;color:#fff;border-color:#31577d}.ph-copy:disabled,.ph-paste:disabled{opacity:.65;cursor:wait}.ph-copy:focus-visible,.ph-setup:focus-visible,.ph-paste:focus-visible{outline:3px solid #457dae;outline-offset:3px}.ph-toolbar.main-layout{clear:both;display:flex;align-items:center;justify-content:space-between;gap:12px;box-sizing:border-box;padding-top:12px;padding-bottom:12px;border-top:1px solid #dbe2e9}.ph-toolbar-status{font:14px/1.4 Arial,sans-serif;color:#254968}.ph-note,.ph-status{display:block;font:13px/1.4 Arial,sans-serif;color:#254968}.ph-status:empty{display:none}.ph-status:not(:empty){margin-top:8px}.ph-paste-row{display:block;margin:10px 0}.ph-paste{display:block;width:100%;font-weight:600}.ph-paste-status{display:block;color:#254968;font:13px/1.4 Arial,sans-serif}.ph-paste-status:empty{display:none}@media(pointer:fine){.ph-actions{display:flex;flex-wrap:wrap;align-items:center;justify-content:flex-end;gap:12px}.ph-copy{width:auto;min-width:210px}.ph-paste{width:auto;min-width:210px}}@media(pointer:coarse){.ph-actions{display:block}.ph-copy{width:100%;min-width:0}.ph-copy,.ph-setup,.ph-paste{min-height:calc(48px * var(--ph-size,1));font-size:calc(16px * var(--ph-size,1));padding:calc(12px * var(--ph-size,1)) calc(16px * var(--ph-size,1))}.ph-actions{padding:calc(12px * var(--ph-size,1)) 0 calc(4px * var(--ph-size,1))}.ph-toolbar.main-layout{gap:calc(10px * var(--ph-size,1));flex-wrap:wrap;padding-top:calc(10px * var(--ph-size,1));padding-bottom:calc(10px * var(--ph-size,1))}.ph-toolbar-status{font-size:calc(14px * var(--ph-size,1));flex:1 1 45%}.ph-note,.ph-status,.ph-paste-status{font-size:calc(13px * var(--ph-size,1))}.ph-paste-row{margin:calc(10px * var(--ph-size,1)) 0}}"; doc.head.append(style);
+    const style = doc.createElement('style'); style.textContent = ".ph-actions{clear:both;display:flex;flex-wrap:wrap;align-items:center;justify-content:flex-end;gap:8px;padding:12px 0 2px}.ph-copy,.ph-paste{box-sizing:border-box;display:inline-flex;align-items:center;justify-content:center;gap:8px;min-height:36px;padding:8px 12px;font:500 13px/1.25 -apple-system,BlinkMacSystemFont,\"Segoe UI\",sans-serif;color:#31577d;background:#fff;border:1px solid #bdcddd;border-radius:6px;cursor:pointer;touch-action:manipulation;max-width:100%}.ph-copy:hover,.ph-paste:hover{background:#f4f7fb;border-color:#8faac4}.ph-copy:active,.ph-paste:active{background:#eaf0f7}.ph-copy:disabled,.ph-paste:disabled{opacity:.6;cursor:wait}.ph-copy:focus-visible,.ph-paste:focus-visible{outline:2px solid #457dae;outline-offset:3px}.ph-icon{width:16px;height:16px;flex:none}.ph-note,.ph-status,.ph-paste-status{display:block;font:12px/1.4 -apple-system,BlinkMacSystemFont,\"Segoe UI\",sans-serif;color:#31577d}.ph-status:empty,.ph-paste-status:empty{display:none}.ph-status:not(:empty){margin:4px 0;flex-basis:100%;text-align:right}.ph-paste-row{display:flex;align-items:center;flex-wrap:wrap;gap:8px;margin:8px 0}.ph-paste{background:#f6f9fc}.ph-paste-status{flex-basis:100%}@media(pointer:coarse){.ph-copy,.ph-paste{min-height:calc(44px * var(--ph-size,1));font-size:calc(14px * var(--ph-size,1));padding:calc(10px * var(--ph-size,1)) calc(12px * var(--ph-size,1));gap:calc(8px * var(--ph-size,1));border-width:calc(1px * var(--ph-size,1));border-radius:calc(7px * var(--ph-size,1))}.ph-actions{padding-top:calc(10px * var(--ph-size,1));padding-bottom:calc(2px * var(--ph-size,1))}.ph-icon{width:calc(16px * var(--ph-size,1));height:calc(16px * var(--ph-size,1))}.ph-note,.ph-status,.ph-paste-status{font-size:calc(12px * var(--ph-size,1))}.ph-paste-row{margin:calc(8px * var(--ph-size,1)) 0}}"; doc.head.append(style);
     syncDensity(doc);
     function scan() {
       for (const row of doc.querySelectorAll('post')) {
         if (!row.querySelector('.post-list-item-published') || row.querySelector('.ph-copy')) continue;
         const host = row.querySelector('.center'); if (!host) continue;
-        const b = doc.createElement('button'); b.type = 'button'; b.className = 'ph-copy'; b.textContent = 'Копировать ссылки';
+        const b = doc.createElement('button'); b.type = 'button'; b.className = 'ph-copy'; actionLabel(b,'Копировать ссылки');
         const status = doc.createElement('span'); status.setAttribute('role','status'); status.className='ph-status';
         b.onclick = async e => {
           e.preventDefault(); e.stopPropagation();
           if (busy) { status.textContent = 'Дождитесь завершения предыдущего копирования.'; return; }
-          busy = true; b.disabled = true; b.textContent = 'Получаю ссылки…'; status.textContent = '';
-          try { const copied = await copyDuringTap(collect(doc, row)); b.textContent = copied ? 'Скопировано' : 'Отчёт открыт'; }
+          busy = true; b.disabled = true; actionLabel(b,'Получаю ссылки…'); status.textContent = '';
+          try { const copied = await copyDuringTap(collect(doc, row)); actionLabel(b,copied ? 'Скопировано' : 'Отчёт открыт'); }
           catch (error) { status.textContent = error.message; }
-          finally { busy = false; b.disabled = false; setTimeout(() => { b.textContent = 'Копировать ссылки'; }, 2500); }
+          finally { busy = false; b.disabled = false; setTimeout(() => { actionLabel(b,'Копировать ссылки'); }, 2500); }
         };
         const actions = doc.createElement('div'); actions.className = 'ph-actions'; actions.append(b,status); host.append(actions);
       }
-      const anchor = doc.querySelector('button[ng-click="newPostProject()"]');
-      if (anchor && !doc.querySelector('.ph-toolbar')) {
-        const toolbar = doc.createElement('div'); toolbar.className = 'main-layout ph-toolbar';
-        const summary = doc.createElement('span'); summary.className = 'ph-toolbar-status'; summary.setAttribute('role', 'status');
-        const setup = doc.createElement('button'); setup.type = 'button'; setup.className = 'ph-setup'; setup.textContent = 'Настроить';
-        setup.setAttribute('aria-label', 'Настроить автовыбор страниц');
-        setup.onclick = e => {
-          e.preventDefault(); e.stopPropagation();
-          const m = newModal(doc);
-          if (m) { configure(doc,m); return; }
-          if (modalOf(doc)) { alert('Закройте окно редактирования перед настройкой автовыбора.'); return; }
-          configureRequested = true; anchor.click();
-        };
-        toolbar.append(summary,setup);
-        (anchor.closest('.main-layout') || anchor.parentElement).after(toolbar);
-      }
-      const summary = doc.querySelector('.ph-toolbar-status'), next = autoSummary(doc);
-      if (summary && summary.textContent !== next) summary.textContent = next;
       const m=newModal(doc);
       if(m){
         addPaste(doc,m);
@@ -275,21 +266,35 @@
 
   style.textContent += '@media(pointer:coarse){.ph-panel{max-width:calc(520px * var(--ph-size,1));font-size:calc(16px * var(--ph-size,1));padding:calc(16px * var(--ph-size,1));max-height:85vh}.ph-panel h3{font-size:calc(20px * var(--ph-size,1))}.ph-button{min-height:calc(48px * var(--ph-size,1));font-size:calc(16px * var(--ph-size,1));padding:calc(12px * var(--ph-size,1));margin:calc(4px * var(--ph-size,1))}.ph-choice{display:flex;align-items:center;gap:calc(10px * var(--ph-size,1));padding:calc(12px * var(--ph-size,1)) 0}.ph-choice input{width:calc(22px * var(--ph-size,1));height:calc(22px * var(--ph-size,1));flex:none}.ph-text{font-size:calc(16px * var(--ph-size,1));height:calc(180px * var(--ph-size,1));max-height:40vh}.ph-overlay{padding:calc(12px * var(--ph-size,1))}}';
 
+  style.textContent += ".ph-utility{position:fixed;right:16px;bottom:78px;z-index:2147483644;display:inline-flex;align-items:center;gap:8px;min-height:36px;padding:8px 12px;box-sizing:border-box;color:#31577d;background:#fff;border:1px solid #c6d3e0;border-radius:8px;font:500 12px/1.2 -apple-system,BlinkMacSystemFont,\"Segoe UI\",sans-serif;cursor:pointer;touch-action:manipulation}.ph-utility[hidden]{display:none}.ph-utility:hover{background:#f5f8fb}.ph-utility:focus-visible{outline:2px solid #457dae;outline-offset:3px}.ph-utility-dot{width:6px;height:6px;flex:none;border-radius:50%;background:#9aa7b5}.ph-utility[data-enabled=true] .ph-utility-dot{background:#45846a}@media(pointer:coarse){.ph-utility{right:calc(12px * var(--ph-size,1));bottom:calc(76px * var(--ph-size,1));gap:calc(7px * var(--ph-size,1));min-height:calc(40px * var(--ph-size,1));padding:calc(10px * var(--ph-size,1)) calc(12px * var(--ph-size,1));font-size:calc(12px * var(--ph-size,1));border-width:calc(1px * var(--ph-size,1));border-radius:calc(8px * var(--ph-size,1))}.ph-utility-dot{width:calc(6px * var(--ph-size,1));height:calc(6px * var(--ph-size,1))}}";
   document.head.append(style);
-  const badge=document.createElement('div');badge.setAttribute('role','status');badge.style.cssText='position:fixed;bottom:8px;right:8px;z-index:2147483645;padding:7px;background:white;color:#254968;border:1px solid #9bb0c3;font:12px Arial,sans-serif';
+  const utility = document.createElement('button'); utility.type = 'button'; utility.className = 'ph-utility';
+  const dot = document.createElement('span'); dot.className = 'ph-utility-dot';dot.setAttribute('aria-hidden','true');
+  const utilityLabel = document.createElement('span');utility.append(dot,utilityLabel);
+  let activeDoc;
+  utility.onclick = event => {
+    event.preventDefault(); event.stopPropagation(); const doc = activeDoc; if(!doc)return;
+    const m = newModal(doc);if(m){configure(doc,m);return;}
+    if(modalOf(doc)){alert('Закройте окно редактирования перед настройкой автовыбора.');return;}
+    const anchor = doc.querySelector('button[ng-click="newPostProject()"]');
+    if(anchor){configureRequested=true;anchor.click();}
+  };
   function refresh(){
-    if(location.pathname.replace(/\/$/,'')!=='/home/posts'){badge.remove();return;}
+    if(location.pathname.replace(/\/$/,'')!=='/home/posts'){utility.remove();return;}
     syncDensity();
     const frame=[...document.querySelectorAll('iframe')].find(f=>{try{return new URL(f.src,location.href).pathname==='/iframe/app/'}catch{return false}});
     try{
       const doc=frame?.contentDocument;
-      if(!doc?.body){if(document.body&&!badge.isConnected)document.body.append(badge);badge.textContent='Помощник: ожидаю список постов';return;}
-      install(doc); syncDensity(doc);
-      const summary = doc.querySelector('.ph-toolbar-status'), next = autoSummary(doc);
-      if(summary && summary.textContent !== next)summary.textContent = next;
-      badge.remove();
-
-    }catch{badge.textContent='Помощник: нет доступа к списку постов';}
+      if(!doc?.body){utility.remove();return;}
+      activeDoc=doc;install(doc);syncDensity(doc);
+      if(!utility.isConnected)document.body.append(utility);
+      const settings=readSettings(doc);
+      const next=settings.pages.length?'Автовыбор · '+settings.pages.length:'Выбрать страницы';
+      if(utilityLabel.textContent!==next)utilityLabel.textContent=next;
+      utility.dataset.enabled=String(settings.enabled&&settings.pages.length>0);
+      utility.title=autoSummary(doc);utility.setAttribute('aria-label',autoSummary(doc)+'. Открыть настройки');
+      utility.hidden=!!modalOf(doc);
+    }catch{utility.remove();}
   }
   refresh();setInterval(refresh,1200);
 })();
