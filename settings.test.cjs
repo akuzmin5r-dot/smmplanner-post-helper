@@ -1,0 +1,11 @@
+const fs=require('node:fs'),vm=require('node:vm'),assert=require('node:assert/strict');
+const source=fs.readFileSync('extension/content.js','utf8');
+const text=source.slice(source.indexOf('  function settingsPagesOf('),source.indexOf('  async function settingsPages('));
+const normalize=vm.runInNewContext(text+';settingsPagesOf');
+const pages=[{id:1,medium:'vk',name:'',page_name:'Example',has_publish_permission:true},{id:2,medium:'vk',name:'Example',has_publish_permission:true},{id:3,medium:'ok',page:{name:' Example '},has_publish_permission:true},{id:4,medium:'vk',name:'Unavailable',has_publish_permission:false}];
+const result=normalize(pages,[{id:9,name:' Group ',pageconfig_set:[2,1,3,4]}]);
+assert.equal(result.length,3);
+assert.deepEqual(Array.from(result,x=>JSON.parse(x.key)),[['Group','vk','Example',0],['Group','vk','Example',1],['Group','ok','Example',0]]);
+assert.deepEqual(Array.from(result,x=>x.total),[2,2,1]);
+assert.equal(normalize([{id:1,medium:'vk',page_name:'A',group:9}],[{id:9,name:'G'}]).length,1);
+console.log('PASS: standalone page settings preserve duplicate ordinals, display names, groups and permissions');
