@@ -1,8 +1,8 @@
 // ==UserScript==
 // @name         SMMplanner — мобильный редактор
 // @namespace    post-helper-mobile
-// @version      1.0.1
-// @description  Вставка текста, автовыбор страниц, заголовки видео и копирование опубликованных ссылок.
+// @version      1.1.0
+// @description  Для iPhone и компьютера: вставка текста, автовыбор страниц, заголовки видео и опубликованные ссылки.
 // @match        https://smmplanner.com/home/new_posts*
 // @match        https://smmplanner.com/home/post_v3*
 // @run-at       document-idle
@@ -16,7 +16,7 @@
 (() => {
   'use strict';
   if (window !== top || window.__postHelperMobile) return;
-  window.__postHelperMobile = '1.0.1';
+  window.__postHelperMobile = '1.1.0';
   const mobile = () => /iPhone|iPad|iPod|Android/.test(navigator.userAgent) || (navigator.maxTouchPoints > 0 && innerWidth < 1024);
   const forms = new WeakMap();
   const sleep = ms => new Promise(resolve => setTimeout(resolve, ms));
@@ -224,7 +224,7 @@
       state.paste = button('Вставить текст', async () => {
         try {
           if (context(editor).state.form.text.trim()) { state.undoText = context(editor).state.form.text; updateText(state, ''); status(state, ''); state.undo.hidden = false; return; }
-          const original = await navigator.clipboard.readText();
+          const original = (await navigator.clipboard.readText()).replace(/\r\n?/g, '\n').replace(/\u2029/g, '\n\n').replace(/\u2028/g, '\n');
           const cleaned = prefs().footerTrim ? trimSubscriptionFooter(original) : { text: original, changed: false };
           state.undoText = original; updateText(state, cleaned.text); status(state, cleaned.removed ? 'Подпись удалена' : ''); state.undo.hidden = !cleaned.removed;
         } catch (e) { status(state, e.name === 'NotAllowedError' ? 'Разрешите вставку из буфера или вставьте текст в поле.' : e.message); }
@@ -322,13 +322,14 @@
   const css = `
     .phm-hidden{display:none!important}
     .phm-editor{font-family:Arial,sans-serif!important;border-radius:20px!important;max-width:620px!important;width:calc(100% - 24px)!important;margin:12px!important}
-    .phm-content{display:flex!important;flex-direction:column!important;gap:12px!important;padding:0 16px 16px!important}
+    .phm-content{display:flex!important;flex-direction:column!important;gap:12px!important;padding:8px 16px 16px!important}
     .phm-content>div[class*="_row_"]{margin:0!important;padding-top:0!important;padding-bottom:0!important}
     .phm-content>.MuiCollapse-hidden,.phm-content>.phm-empty-row{display:none!important}
     .phm-text-row{order:10}.phm-commands{order:11;display:flex;gap:10px}.phm-feedback{order:12;display:flex;gap:8px;align-items:center;flex-wrap:wrap;color:#667080;font-size:13px}.phm-feedback:has(span:empty):has(button[hidden]){display:none}
     .phm-field{border:1px solid #cdd1da!important;border-radius:14px!important;padding:12px!important}
     .phm-field [data-lexical-editor]{min-height:130px!important;font-size:16px!important;line-height:1.5!important;padding:0!important;outline-offset:6px}
     .phm-field [data-lexical-editor] p{margin:0!important}
+    .phm-field [data-lexical-editor]>p+p{margin-top:1em!important}
     .phm-button{font:inherit;line-height:1.3;border:1px solid #cdd1da;background:#f7f8fa;color:#303845;border-radius:10px;min-height:46px;padding:10px 16px;cursor:pointer;touch-action:manipulation}
     .phm-button:focus-visible{outline:2px solid #4857bb;outline-offset:3px}.phm-button:disabled{opacity:.45;cursor:default}.phm-button[hidden]{display:none}
     .phm-paste{flex:1;text-align:center}.phm-gpt{background:transparent}.phm-undo{border:0;background:none;min-height:32px;padding:0;text-decoration:underline;font-size:inherit;color:inherit}
@@ -342,12 +343,13 @@
     .phm-now{grid-row:1;grid-column:1}.phm-plan{grid-row:1;grid-column:2}.phm-draft{grid-row:2;grid-column:1/-1;text-align:center!important}.phm-draft button{min-height:36px!important;border:0!important;background:transparent!important;box-shadow:none!important;font-size:13px!important;padding:4px 12px!important}
     .phm-copy{padding:10px!important;min-width:44px!important;min-height:44px!important;background:transparent!important;border:0!important;border-radius:8px!important;color:inherit!important}
     .phm-copy-dialog{width:calc(100% - 48px);max-width:460px;padding:20px;border:0;border-radius:16px;font:16px/1.5 Arial,sans-serif}.phm-copy-dialog::backdrop{background:#0006}.phm-copy-dialog textarea{box-sizing:border-box;width:100%;min-height:220px;font:16px/1.5 Arial,sans-serif;border:1px solid #cdd1da;border-radius:10px;padding:12px}.phm-copy-dialog .phm-button{margin-top:12px;width:100%}
+    @media(min-width:900px){.phm-editor{max-width:760px!important;margin:24px!important}.phm-content{padding-left:24px!important;padding-right:24px!important}}
   `;
   const style = document.createElement('style'); style.textContent = css; document.head.append(style);
   let pending = false;
   function scan() {
     pending = false;
-    if (!mobile() || !/^\/home\/(new_posts|post_v3)(\/|$)/.test(location.pathname)) return;
+    if (!/^\/home\/(new_posts|post_v3)(\/|$)/.test(location.pathname)) return;
     document.querySelectorAll('[data-lexical-editor="true"][contenteditable="true"]').forEach(adapt); feed();
   }
   new MutationObserver(() => { if (!pending) { pending = true; setTimeout(scan, 120); } }).observe(document.body, { childList: true, subtree: true, characterData: true, attributes: true, attributeFilter: ['class'] });
@@ -357,5 +359,13 @@
     clearTimeout(inputTimer); inputTimer = setTimeout(scan, 450);
   }, true);
   window.addEventListener('resize', () => { if (!pending) { pending = true; setTimeout(scan, 120); } });
+  document.addEventListener('click', e => {
+    if (mobile() || location.pathname.replace(/\/$/, '') !== '/home/new_posts/feed' || e.button !== 0 || e.ctrlKey || e.metaKey || e.shiftKey || e.altKey) return;
+    const b = e.target.closest?.('button,a');
+    if (!b || b.disabled || b.getAttribute('aria-disabled') === 'true' || !/^(?:Создать\s+)?пост$/iu.test(b.textContent.trim())) return;
+    e.preventDefault(); e.stopImmediatePropagation();
+    const url = new URL('/home/post_v3', location.origin); url.search = location.search;
+    location.assign(url.href);
+  }, true);
   scan();
 })();
