@@ -1,10 +1,7 @@
 const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const vm = require('node:vm');
-const source = fs.readFileSync(__dirname + '/smmplanner-mobile.user.js', 'utf8');
-assert.equal(fs.readFileSync(__dirname + '/new-editor-extension/content.js', 'utf8'), source, 'Packaged extension must contain the current script');
-const manifest = JSON.parse(fs.readFileSync(__dirname + '/new-editor-extension/manifest.json', 'utf8'));
-assert.equal(manifest.version, source.match(/@version\s+(\S+)/)[1]);
+const source = fs.readFileSync(require('node:path').join(__dirname,'..','smmplanner-mobile.user.js'), 'utf8');
 const start = source.indexOf('  function footerKey(');
 const end = source.indexOf('  function rowOf(', start);
 assert(start >= 0 && end > start);

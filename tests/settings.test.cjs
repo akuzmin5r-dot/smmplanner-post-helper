@@ -1,5 +1,5 @@
 const fs=require('node:fs'),vm=require('node:vm'),assert=require('node:assert/strict');
-const source=fs.readFileSync('extension/content.js','utf8');
+const source=fs.readFileSync(require('node:path').join(__dirname,'..','smmplanner-tampermonkey.user.js'),'utf8');
 const text=source.slice(source.indexOf('  function settingsPagesOf('),source.indexOf('  async function settingsPages('));
 const normalize=vm.runInNewContext(text+';settingsPagesOf');
 const pages=[{id:1,medium:'vk',name:'',page_name:'Example',has_publish_permission:true},{id:2,medium:'vk',name:'Example',has_publish_permission:true},{id:3,medium:'ok',page:{name:' Example '},has_publish_permission:true},{id:4,medium:'vk',name:'Unavailable',has_publish_permission:false}];

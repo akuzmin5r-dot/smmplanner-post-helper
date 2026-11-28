@@ -1,8 +1,8 @@
 // ==UserScript==
 // @name         SMMplanner — мобильный редактор
 // @namespace    post-helper-mobile
-// @version      1.1.1
-// @description  Для iPhone и компьютера: вставка текста, автовыбор страниц, заголовки видео и опубликованные ссылки.
+// @version      1.2.0
+// @description  iPhone: вставка текста, автовыбор страниц, заголовки видео и опубликованные ссылки.
 // @match        https://smmplanner.com/home/new_posts*
 // @match        https://smmplanner.com/home/post_v3*
 // @run-at       document-idle
@@ -16,8 +16,7 @@
 (() => {
   'use strict';
   if (window !== top || window.__postHelperMobile) return;
-  window.__postHelperMobile = '1.1.1';
-  const mobile = () => /iPhone|iPad|iPod|Android/.test(navigator.userAgent) || (navigator.maxTouchPoints > 0 && innerWidth < 1024);
+  window.__postHelperMobile = '1.2.0';
   const forms = new WeakMap();
   const sleep = ms => new Promise(resolve => setTimeout(resolve, ms));
   function mark(node, name) { if (node && !node.classList.contains(name)) node.classList.add(name); }
@@ -59,7 +58,6 @@
     const unique = [...new Map(candidates.map(pages => [pages.map(p => p.id).sort().join(','), pages])).values()];
     return unique.length === 1 ? unique[0] : [];
   }
-  // Shared pure text helpers are inserted at build time.
   function footerKey(value) {
     const text = String(value || '')
       .replace(/\[([^\]\r\n]+)\]\(\s*(?:https?:\/\/|t\.me\/|max\.ru\/)[^)\s]+\s*\)/gi, '$1')
@@ -124,7 +122,7 @@
   }
 
   function videoTitleOf(text) {
-    const paragraph = String(text || '').replace(/\r\n?/g, '\n').trim().split(/\n[ \t]*\n/)[0];
+    const paragraph = String(text || '').replace(/\r\n?/g, '\n').replace(/\u2029/g, '\n\n').replace(/\u2028/g, '\n').trim().split(/\n[ \t]*\n/)[0];
     const clean = paragraph
       .replace(/\[([^\]]*)\]\([^)]+\)/g, '$1')
       .replace(/(\*\*|__)(.*?)\1/g, '$2')
@@ -145,10 +143,37 @@
   function updateText(state, value) {
     const c = context(state.editor);
     if (!c?.refs.textEditor.current?.updateValue) throw Error('Редактор ещё загружается. Повторите попытку.');
+    clearTimeout(state.cleanupTimer); state.cleanupTimer = null;
+    clearUndo(state);
     c.refs.textEditor.current.updateValue(value);
     setTimeout(scan, 450);
   }
   function status(state, message) { if (state.status.textContent !== message) state.status.textContent = message; }
+  function clearUndo(state) {
+    state.undoVersion = (state.undoVersion || 0) + 1;
+    if (state.undo) state.undo.hidden = true;
+    state.undoMarkup = null;
+    if (state.status?.textContent === 'Подпись удалена') status(state, '');
+  }
+  function offerUndo(state, original) {
+    const version = state.undoVersion;
+    requestAnimationFrame(() => {
+      if (!state.editor.isConnected || state.undoVersion !== version) return;
+      state.undoText = original; state.undoMarkup = state.editor.innerHTML;
+      state.undo.hidden = false; status(state, 'Подпись удалена');
+    });
+  }
+  function queueCleanup(state) {
+    clearTimeout(state.cleanupTimer);
+    state.cleanupTimer = setTimeout(() => {
+      state.cleanupTimer = null;
+      if (!state.editor.isConnected || forms.get(state.editor.closest('[role="dialog"]')) !== state || !prefs().footerTrim) return;
+      const original = context(state.editor)?.state.form.text;
+      if (typeof original !== 'string') return;
+      const cleaned = trimSubscriptionFooter(original);
+      if (cleaned.removed) { updateText(state, cleaned.text); offerUndo(state, original); }
+    }, 650);
+  }
   function settings(state, c) {
     const available = c.queries?.pageConfigSet?.data?.array;
     if (state.settings || !available?.length) return;
@@ -186,6 +211,7 @@
     if (!available?.length) return;
     if (!p.autoPages || c.state.form.pageConfigs.length) { state.autoDone = true; return; }
     let chosen = Array.isArray(p.pageIds) ? available.filter(pc => p.pageIds.includes(String(pc.id))) : importPages(available);
+    if (Array.isArray(p.pageIds) && chosen.length !== p.pageIds.length) { status(state, 'Список страниц изменился. Проверьте автовыбор в настройках.'); return; }
     if (!chosen.length && !Array.isArray(p.pageIds)) {
       const vk = available.filter(pc => pc.medium === 'vk'), ok = available.filter(pc => pc.medium === 'ok');
       if (vk.length === 1 && ok.length === 1) chosen = [vk[0], ok[0]];
@@ -198,8 +224,7 @@
   function autoVideo(state, c) {
     if (!prefs().autoVideoTitle || c.state.existingPostProject?.id) return;
     const title = videoTitleOf(c.state.form.text);
-    if (!title) return;
-    const ids = c.state.form.media.filter(m => m.type === 'video' && (!m.title || state.titles.get(m.uid) === m.title) && m.title !== title).map(m => m.uid);
+    const ids = c.state.form.media.filter(m => m.type === 'video' && (state.titles.has(m.uid) ? state.titles.get(m.uid) === m.title : !m.title) && String(m.title || '') !== title).map(m => m.uid);
     if (!ids.length) return;
     for (const id of ids) state.titles.set(id, title);
     c.actions.updateForm(form => { for (const m of form.media) if (ids.includes(m.uid)) m.title = title; });
@@ -215,37 +240,46 @@
       } else if (row.getBoundingClientRect().height === 0) mark(row, 'phm-empty-row');
     }
     let state = forms.get(modal);
+    const previous = state;
+    if (state && (state.editor !== editor || !state.commands?.isConnected)) {
+      clearTimeout(state.cleanupTimer); state.commands?.remove(); state.feedback?.remove(); state.settings?.remove();
+      forms.delete(modal); state = null;
+    }
     if (!state) {
-      state = { editor, inner, titles: new Map() }; forms.set(modal, state);
+      state = { editor, inner, titles: previous?.titles || new Map(), autoDone: previous?.autoDone }; forms.set(modal, state);
       mark(rowOf(editor, inner), 'phm-text-row');
       const field = editor.parentElement; mark(field, 'phm-field');
       const toolbar = field.querySelector('.MuiGrid-container'); mark(toolbar, 'phm-hidden');
       const commands = document.createElement('div'); commands.className = 'phm-commands';
+      state.commands = commands;
       state.paste = button('Вставить текст', async () => {
+        if (state.pending) return;
+        state.pending = true; state.paste.disabled = true;
         try {
-          if (context(editor).state.form.text.trim()) { state.undoText = context(editor).state.form.text; updateText(state, ''); status(state, ''); state.undo.hidden = false; return; }
+          if (editor.textContent.trim() || context(editor).state.form.text.trim()) { updateText(state, ''); status(state, ''); return; }
           const original = (await navigator.clipboard.readText()).replace(/\r\n?/g, '\n').replace(/\u2029/g, '\n\n').replace(/\u2028/g, '\n');
-          const cleaned = prefs().footerTrim ? trimSubscriptionFooter(original) : { text: original, changed: false };
-          state.undoText = original; updateText(state, cleaned.text); status(state, cleaned.removed ? 'Подпись удалена' : ''); state.undo.hidden = !cleaned.removed;
+          if (!editor.isConnected) return;
+          if (editor.textContent.trim() || context(editor).state.form.text.trim()) { status(state, 'В поле уже появился текст. Он сохранён.'); return; }
+          const cleaned = trimSubscriptionFooter(original, prefs());
+          updateText(state, cleaned.text); status(state, '');
+          if (cleaned.removed) offerUndo(state, original);
         } catch (e) { status(state, e.name === 'NotAllowedError' ? 'Разрешите вставку из буфера или вставьте текст в поле.' : e.message); }
+        finally { state.pending = false; state.paste.disabled = false; }
       }, 'phm-paste'); commands.append(state.paste);
       const gpt = toolbar && [...toolbar.querySelectorAll('button')].find(b => /Чат GPT/.test(b.textContent));
       if (gpt) commands.append(button('Чат GPT+', () => gpt.click(), 'phm-gpt'));
       state.status = document.createElement('span'); state.status.setAttribute('role', 'status');
-      state.undo = button('Вернуть текст', () => { updateText(state, state.undoText || ''); state.undo.hidden = true; status(state, ''); }, 'phm-undo'); state.undo.hidden = true;
+      state.undo = button('Вернуть подпись', () => {
+        if (state.undoMarkup !== editor.innerHTML) { clearUndo(state); return; }
+        updateText(state, state.undoText || ''); status(state, '');
+      }, 'phm-undo'); state.undo.hidden = true;
       const feedback = document.createElement('div'); feedback.className = 'phm-feedback'; feedback.append(state.status, state.undo);
+      state.feedback = feedback;
       inner.append(commands, feedback);
       editor.addEventListener('paste', e => {
         if (!prefs().footerTrim || !e.clipboardData) return;
         if (!trimSubscriptionFooter(e.clipboardData.getData('text/plain')).removed) return;
-        setTimeout(() => {
-          if (!editor.isConnected || !prefs().footerTrim) return;
-          const original = context(editor)?.state.form.text;
-          if (typeof original !== 'string') return;
-          const cleaned = trimSubscriptionFooter(original);
-          if (!cleaned.removed) return;
-          state.undoText = original; updateText(state, cleaned.text); state.undo.hidden = false; status(state, 'Подпись удалена');
-        }, 500);
+        queueCleanup(state);
       }, true);
     }
     const label = c.state.form.text.trim() ? 'Очистить текст' : 'Вставить текст';
@@ -283,7 +317,11 @@
   const idOf = value => { const id = typeof value === 'object' ? value?.id : value; if (!/^\d+$/.test(String(id))) throw Error('Не удалось определить публикацию.'); return String(id); };
   async function report(post) {
     const headers = { 'X-Organization-Context': idOf(post.organization) };
-    const get = async url => { const r = await fetch(url, { credentials: 'same-origin', headers }); if (!r.ok) throw Error('Не удалось загрузить опубликованные ссылки.'); return r.json(); };
+    const get = async url => {
+      const controller = new AbortController(), timer = setTimeout(() => controller.abort(), 15000);
+      try { const r = await fetch(url, { credentials: 'same-origin', headers, signal: controller.signal }); if (!r.ok) throw Error('Не удалось загрузить опубликованные ссылки.'); return await r.json(); }
+      finally { clearTimeout(timer); }
+    };
     const project = await get('/api/v1/postproject/' + idOf(post.project));
     if (!Array.isArray(project.post_set) || project.post_set.length > 100) throw Error('Не удалось прочитать публикации.');
     const posts = await Promise.all(project.post_set.map(p => get('/api/v1/post/' + idOf(p))));
@@ -304,8 +342,9 @@
           try {
             const source = props(original, p => p.post?.project?.id && p.post.publishing_status)?.post;
             const pending = report(source).then(value => (text = value));
+            const payload = pending.then(t => new Blob([t], { type: 'text/plain' })); payload.catch(() => {});
             if (navigator.clipboard?.write && window.ClipboardItem) {
-              try { await navigator.clipboard.write([new ClipboardItem({ 'text/plain': pending.then(t => new Blob([t], { type: 'text/plain' })) })]); }
+              try { await navigator.clipboard.write([new ClipboardItem({ 'text/plain': payload })]); }
               catch { text = await pending; copyFallback(text); return; }
             } else { text = await pending; copyFallback(text); return; }
             copy.setAttribute('aria-label', 'Скопировано'); copy.title = 'Скопировано'; await sleep(1400);
@@ -360,16 +399,10 @@
   let inputTimer;
   document.addEventListener('input', e => {
     if (!e.target.closest?.('[data-lexical-editor]')) return;
+    const state = forms.get(e.target.closest('[role="dialog"]'));
+    if (state) { clearUndo(state); if (state.cleanupTimer) queueCleanup(state); }
     clearTimeout(inputTimer); inputTimer = setTimeout(scan, 450);
   }, true);
   window.addEventListener('resize', () => { if (!pending) { pending = true; setTimeout(scan, 120); } });
-  document.addEventListener('click', e => {
-    if (mobile() || location.pathname.replace(/\/$/, '') !== '/home/new_posts/feed' || e.button !== 0 || e.ctrlKey || e.metaKey || e.shiftKey || e.altKey) return;
-    const b = e.target.closest?.('button,a');
-    if (!b || b.disabled || b.getAttribute('aria-disabled') === 'true' || !/^(?:Создать\s+)?пост$/iu.test(b.textContent.trim())) return;
-    e.preventDefault(); e.stopImmediatePropagation();
-    const url = new URL('/home/post_v3', location.origin); url.search = location.search;
-    location.assign(url.href);
-  }, true);
   scan();
 })();

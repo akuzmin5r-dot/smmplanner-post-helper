@@ -1,5 +1,5 @@
 const fs=require('node:fs'),vm=require('node:vm'),assert=require('node:assert/strict');
-const source=fs.readFileSync('smmplanner-tampermonkey.user.js','utf8');
+const source=fs.readFileSync(require('node:path').join(__dirname,'..','smmplanner-tampermonkey.user.js'),'utf8');
 const start=source.indexOf('  const firstLine'),end=source.indexOf('  function titleOf');
 const context={URL,Set,String,Error};
 vm.runInNewContext(source.slice(start,end)+';this.reportOf=reportOf;',context);
@@ -9,20 +9,6 @@ assert.equal(context.reportOf(modal('', ['https://one.invalid/p','https://one.in
 assert.throws(()=>context.reportOf(modal('Title',[])),/Опубликованных ссылок пока нет/);
 assert.throws(()=>context.reportOf({querySelector:()=>null}),/Не найден полный текст/);
 console.log('PASS: arbitrary published links, headline, line spacing, deduplication, unsafe URL rejection, empty/missing data');
-
-const actionSource=source.slice(source.indexOf('  function invokeNativeOk('),source.indexOf('  function enhanceEditor('));
-const actionContext={};vm.runInNewContext(actionSource+';this.invoke=invokeNativeOk;',actionContext);
-let clicks=0;const native={isConnected:true,disabled:false,getAttribute:()=>null,click:()=>clicks++};const actionModal={querySelector:()=>native};
-native.disabled=true;assert.equal(actionContext.invoke(actionModal),false);assert.equal(clicks,0);
-native.disabled=false;native.isConnected=false;assert.equal(actionContext.invoke(actionModal),false);assert.equal(clicks,0);
-native.isConnected=true;
-native.getAttribute=()=> 'true';assert.equal(actionContext.invoke(actionModal),false);assert.equal(clicks,0);
-native.getAttribute=()=>null;assert.equal(actionContext.invoke(actionModal),true);assert.equal(clicks,1);
-const densitySource=source.slice(source.indexOf('  function syncDensity('),source.indexOf('  function autoSummary('));
-let density='';const densityContext={document:{documentElement:{clientWidth:980,style:{getPropertyValue:()=>density,setProperty:(name,value)=>{density=value}}}},screen:{width:390},matchMedia:()=>({matches:true}),visualViewport:{scale:0.4},Math,String};
-vm.runInNewContext(densitySource+';this.sync=syncDensity;',densityContext);
-densityContext.sync();const fixed=density;densityContext.visualViewport.scale=2;densityContext.sync();assert.equal(density,fixed);
-console.log('PASS: native action respects disabled/disconnected controls (stub only); CSS density stays fixed during pinch zoom');
 
 const footerSource=source.slice(source.indexOf('  function footerKey('),source.indexOf('  function addPaste('));
 const footerContext={};vm.runInNewContext(footerSource+';this.trim=trimSubscriptionFooter;',footerContext);

@@ -1,5 +1,5 @@
 const fs=require('node:fs'),vm=require('node:vm'),assert=require('node:assert/strict');
-const source=fs.readFileSync('extension/content.js','utf8');
+const source=fs.readFileSync(require('node:path').join(__dirname,'..','smmplanner-tampermonkey.user.js'),'utf8');
 const code=source.slice(source.indexOf('  function newsGridTracks('),source.indexOf('  const groupFooters'));
 const tracks=vm.runInNewContext(code+';newsGridTracks');
 const groups=[{key:'a',rows:[1,2]},{key:null,rows:[3]},{key:'b',rows:[4,5,6]}];
