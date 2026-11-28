@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         SMMplanner — мобильный редактор
 // @namespace    post-helper-mobile
-// @version      1.1.0
+// @version      1.1.1
 // @description  Для iPhone и компьютера: вставка текста, автовыбор страниц, заголовки видео и опубликованные ссылки.
 // @match        https://smmplanner.com/home/new_posts*
 // @match        https://smmplanner.com/home/post_v3*
@@ -16,7 +16,7 @@
 (() => {
   'use strict';
   if (window !== top || window.__postHelperMobile) return;
-  window.__postHelperMobile = '1.1.0';
+  window.__postHelperMobile = '1.1.1';
   const mobile = () => /iPhone|iPad|iPod|Android/.test(navigator.userAgent) || (navigator.maxTouchPoints > 0 && innerWidth < 1024);
   const forms = new WeakMap();
   const sleep = ms => new Promise(resolve => setTimeout(resolve, ms));
@@ -251,6 +251,9 @@
     const label = c.state.form.text.trim() ? 'Очистить текст' : 'Вставить текст';
     mark(rowOf(editor, inner), 'phm-text-row');
     mark(editor.parentElement, 'phm-field');
+    for (const child of editor.parentElement.children) {
+      if (child !== editor && !child.matches('.MuiGrid-container') && !child.children.length && child.textContent.trim() && getComputedStyle(child).position === 'absolute') mark(child, 'phm-placeholder');
+    }
     mark(editor.parentElement.querySelector('.MuiGrid-container'), 'phm-hidden');
     if (state.paste.textContent !== label) state.paste.textContent = label;
     autoSelect(state, c); autoVideo(state, c); settings(state, c);
@@ -327,7 +330,8 @@
     .phm-content>.MuiCollapse-hidden,.phm-content>.phm-empty-row{display:none!important}
     .phm-text-row{order:10}.phm-commands{order:11;display:flex;gap:10px}.phm-feedback{order:12;display:flex;gap:8px;align-items:center;flex-wrap:wrap;color:#667080;font-size:13px}.phm-feedback:has(span:empty):has(button[hidden]){display:none}
     .phm-field{border:1px solid #cdd1da!important;border-radius:14px!important;padding:12px!important}
-    .phm-field [data-lexical-editor]{min-height:130px!important;font-size:16px!important;line-height:1.5!important;padding:0!important;outline-offset:6px}
+    .phm-field [data-lexical-editor]{min-height:130px!important;font-size:16px!important;line-height:1.5!important;padding:0!important;margin:0!important;outline-offset:6px}
+    .phm-field>.phm-placeholder{position:absolute!important;inset:12px 12px auto!important;padding:0!important;margin:0!important;font:400 16px/24px Arial,sans-serif!important;color:#7b8793;pointer-events:none}
     .phm-field [data-lexical-editor] p{margin:0!important}
     .phm-field [data-lexical-editor]>p+p{margin-top:1em!important}
     .phm-button{font:inherit;line-height:1.3;border:1px solid #cdd1da;background:#f7f8fa;color:#303845;border-radius:10px;min-height:46px;padding:10px 16px;cursor:pointer;touch-action:manipulation}

@@ -1,5 +1,8 @@
 Установка в Chrome и Яндекс Браузер
 
+Версия 3.1.0 для старой страницы /home/posts.
+Для iPhone и нового редактора используется отдельный smmplanner-mobile.user.js.
+
 Распакуйте архив в постоянную папку.
 Chrome: откройте chrome://extensions
 Яндекс Браузер: откройте browser://extensions

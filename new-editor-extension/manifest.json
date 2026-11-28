@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "SMMplanner New Editor Helper",
-  "version": "1.1.0",
+  "version": "1.1.1",
   "description": "Paste, page selection, video titles and published links for the new SMMplanner editor.",
   "permissions": [
     "clipboardRead",

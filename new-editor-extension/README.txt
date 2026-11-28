@@ -1,4 +1,4 @@
-SMMplanner New Editor Helper 1.1.0
+SMMplanner New Editor Helper 1.1.1
 
 1. Распакуйте ZIP в постоянную папку.
 2. Откройте chrome://extensions или browser://extensions.
