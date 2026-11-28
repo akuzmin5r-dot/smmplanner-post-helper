@@ -1,7 +1,7 @@
-﻿// ==UserScript==
+// ==UserScript==
 // @name         SMMplanner — мобильный редактор
 // @namespace    post-helper-mobile
-// @version      1.0.0
+// @version      1.0.1
 // @description  Вставка текста, автовыбор страниц, заголовки видео и копирование опубликованных ссылок.
 // @match        https://smmplanner.com/home/new_posts*
 // @match        https://smmplanner.com/home/post_v3*
@@ -16,7 +16,7 @@
 (() => {
   'use strict';
   if (window !== top || window.__postHelperMobile) return;
-  window.__postHelperMobile = '1.0.0';
+  window.__postHelperMobile = '1.0.1';
   const mobile = () => /iPhone|iPad|iPod|Android/.test(navigator.userAgent) || (navigator.maxTouchPoints > 0 && innerWidth < 1024);
   const forms = new WeakMap();
   const sleep = ms => new Promise(resolve => setTimeout(resolve, ms));
@@ -146,6 +146,7 @@
     const c = context(state.editor);
     if (!c?.refs.textEditor.current?.updateValue) throw Error('Редактор ещё загружается. Повторите попытку.');
     c.refs.textEditor.current.updateValue(value);
+    setTimeout(scan, 450);
   }
   function status(state, message) { if (state.status.textContent !== message) state.status.textContent = message; }
   function settings(state, c) {
@@ -332,7 +333,9 @@
     .phm-button:focus-visible{outline:2px solid #4857bb;outline-offset:3px}.phm-button:disabled{opacity:.45;cursor:default}.phm-button[hidden]{display:none}
     .phm-paste{flex:1;text-align:center}.phm-gpt{background:transparent}.phm-undo{border:0;background:none;min-height:32px;padding:0;text-decoration:underline;font-size:inherit;color:inherit}
     .phm-media{order:20;margin-top:4px!important}.phm-media [class*="_dropZone_"]{border-radius:14px!important;min-height:90px!important;height:auto!important;padding:14px 12px!important}
-    .phm-content>.phm-schedule:first-of-type{margin-top:4px!important}
+    .phm-media>div:not(.phm-hidden){margin-top:0!important}
+    .phm-schedule>[class*="_head_"]{margin:4px 0 12px!important}
+    .phm-elements>p,.phm-post-settings>p{margin:4px 0 12px!important}
     .phm-schedule{order:30}.phm-elements{order:40}.phm-post-settings{order:41}.phm-settings{order:50;border-top:1px solid #e5e7eb;padding-top:14px;color:#535c6c;font-size:14px}.phm-settings>summary{cursor:pointer;min-height:38px;align-content:center}.phm-settings-body{display:flex;flex-direction:column;gap:14px;padding:12px 0}.phm-settings-body strong{color:#303845;font-size:14px;font-weight:600}.phm-settings-body label{display:flex;gap:10px;align-items:flex-start;line-height:1.4}.phm-settings-body input{width:18px;height:18px;margin:0;flex-shrink:0;accent-color:#4857bb}
     .phm-actions{display:grid!important;grid-template-columns:minmax(0,1fr) minmax(0,1fr)!important;gap:12px!important;align-items:stretch!important}
     .phm-actions>div:not(.phm-draft){display:contents!important}.phm-actions .phm-now,.phm-actions .phm-plan{margin:0!important;min-width:0!important;width:100%!important;min-height:50px!important;font-size:15px!important;line-height:1.3!important;padding:10px!important;border-radius:12px!important;white-space:normal!important}
@@ -347,6 +350,12 @@
     if (!mobile() || !/^\/home\/(new_posts|post_v3)(\/|$)/.test(location.pathname)) return;
     document.querySelectorAll('[data-lexical-editor="true"][contenteditable="true"]').forEach(adapt); feed();
   }
-  new MutationObserver(() => { if (!pending) { pending = true; setTimeout(scan, 120); } }).observe(document.body, { childList: true, subtree: true, attributes: true, attributeFilter: ['class'] });
+  new MutationObserver(() => { if (!pending) { pending = true; setTimeout(scan, 120); } }).observe(document.body, { childList: true, subtree: true, characterData: true, attributes: true, attributeFilter: ['class'] });
+  let inputTimer;
+  document.addEventListener('input', e => {
+    if (!e.target.closest?.('[data-lexical-editor]')) return;
+    clearTimeout(inputTimer); inputTimer = setTimeout(scan, 450);
+  }, true);
+  window.addEventListener('resize', () => { if (!pending) { pending = true; setTimeout(scan, 120); } });
   scan();
 })();
